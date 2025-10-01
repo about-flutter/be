@@ -9,13 +9,14 @@ require('dotenv').config();
 
 // POST /signup
 router.post('/signup', async (req, res) => {
-  let { name, email, password, dateOfBirth } = req.body;
+  let { name, email, password, dateOfBirth, phone } = req.body;  // Thêm phone vào destructuring
   name = name?.trim();
   email = email?.trim();
   password = password?.trim();
   dateOfBirth = dateOfBirth?.trim();
+  phone = phone?.trim();  // Trim nếu có, optional nên không check empty
 
-  // Validation empty fields
+  // Validation empty fields (phone optional, bỏ check !phone)
   if (!name || !email || !password || !dateOfBirth) {
     return res.json({ status: 'FAILED', message: 'Empty input fields' });
   }
@@ -28,6 +29,11 @@ router.post('/signup', async (req, res) => {
   // Validate email (basic)
   if (!/^[\w-.]+@([\w-]+\.)+[\w-]{2,4}$/.test(email)) {
     return res.json({ status: 'FAILED', message: 'Invalid email' });
+  }
+
+  // Optional: Validate phone (nếu muốn, ví dụ: số điện thoại Việt Nam)
+  if (phone && !/^\d{10,11}$/.test(phone)) {
+    return res.json({ status: 'FAILED', message: 'Invalid phone number' });
   }
 
   try {
@@ -47,8 +53,7 @@ router.post('/signup', async (req, res) => {
       email,
       password: hashedPassword,
       birthday: dateOfBirth,
-      phone:phone,
-      
+      phone,  // Giờ phone đã defined, optional nên nếu undefined thì không set
     });
     await newUser.save();
 
