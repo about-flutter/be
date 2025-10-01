@@ -2,7 +2,8 @@ const nodemailer = require('nodemailer');
 const bcrypt = require('bcryptjs');
 require('dotenv').config();
 
-const transporter = nodemailer.createTransporter({
+// ✅ Đúng phải là createTransport (không phải createTransporter)
+const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
     user: process.env.GMAIL_USER,
@@ -10,10 +11,13 @@ const transporter = nodemailer.createTransporter({
   },
 });
 
+// Sinh mã OTP 4 số
 const generateOTP = () => {
-  return Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
+  return Math.floor(1000 + Math.random() * 9000).toString(); // 4-digit OTP
 };
 
+
+// Gửi OTP qua email
 const sendOTP = async (email, otp) => {
   try {
     const mailOptions = {
@@ -24,13 +28,14 @@ const sendOTP = async (email, otp) => {
     };
 
     await transporter.sendMail(mailOptions);
-    console.log(`OTP sent to ${email}`);
+    console.log(`✅ OTP sent to ${email}`);
   } catch (error) {
-    console.error('Error sending OTP:', error);
+    console.error('❌ Error sending OTP:', error);
     throw new Error('Failed to send OTP');
   }
 };
 
+// Hash OTP rồi lưu vào user model
 const hashAndStoreOTP = async (user, otp) => {
   const salt = await bcrypt.genSalt(10);
   user.otp = await bcrypt.hash(otp, salt);
