@@ -4,7 +4,8 @@ require('dotenv').config();
 
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
-const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();  // 6 digits
+// OTP 4 số
+const generateOTP = () => Math.floor(1000 + Math.random() * 9000).toString();
 
 const sendOTPVerificationEmail = async (userId, email) => {
   try {
