@@ -2,21 +2,22 @@ const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
 const UserOTPVerification = require('../models/UserOTPVerification');
-const bcrypt = require('bcryptjs');  // Import cho hash trong signup
+const bcrypt = require('bcryptjs');  // Giữ import nếu cần cho OTP
 const jwt = require('jsonwebtoken');
 const { sendOTPVerificationEmail } = require('../utils/sendOTP');
 require('dotenv').config();
 
 // POST /signup
 router.post('/signup', async (req, res) => {
-  let { name, email, password, dateOfBirth, phone } = req.body;  // Thêm phone vào destructuring
+  let { name, email, password, dateOfBirth, phone, address } = req.body;  // Thêm address
   name = name?.trim();
-  email = email?.trim();
+  email = email?.toLowerCase().trim();  // Thêm toLowerCase cho case-insensitive
   password = password?.trim();
   dateOfBirth = dateOfBirth?.trim();
-  phone = phone?.trim();  // Trim nếu có, optional nên không check empty
+  phone = phone?.trim();
+  address = address?.trim();  // Optional
 
-  // Validation empty fields (phone optional, bỏ check !phone)
+  // Validation empty fields (phone/address optional)
   if (!name || !email || !password || !dateOfBirth) {
     return res.json({ status: 'FAILED', message: 'Empty input fields' });
   }
@@ -31,7 +32,7 @@ router.post('/signup', async (req, res) => {
     return res.json({ status: 'FAILED', message: 'Invalid email' });
   }
 
-  // Optional: Validate phone (nếu muốn, ví dụ: số điện thoại Việt Nam)
+  // Optional: Validate phone
   if (phone && !/^\d{10,11}$/.test(phone)) {
     return res.json({ status: 'FAILED', message: 'Invalid phone number' });
   }
@@ -43,24 +44,21 @@ router.post('/signup', async (req, res) => {
       return res.json({ status: 'FAILED', message: 'User with the provided email already exists' });
     }
 
-    // Hash password
-    const saltRounds = 10;
-    const hashedPassword = await bcrypt.hash(password, saltRounds);
-
-    // Create new user (isVerified: false default)
+    // SỬA: Không hash manual - để pre-save hook handle
     const newUser = new User({
       name,
       email,
-      password: hashedPassword,
+      password,  // Plain password - pre-save sẽ hash
       birthday: dateOfBirth,
-      phone,  // Giờ phone đã defined, optional nên nếu undefined thì không set
+      phone,
+      address  // Thêm nếu có
     });
-    await newUser.save();
+    await newUser.save();  // Pre-save hook chạy ở đây, hash password
 
     // Send OTP and get hashedOTP
     const { hashedOTP, expiresAt } = await sendOTPVerificationEmail(newUser._id, email);
 
-    // Create OTP record in separate collection
+    // Create OTP record
     const otpVerification = new UserOTPVerification({
       userId: newUser._id,
       otp: hashedOTP,
@@ -68,52 +66,50 @@ router.post('/signup', async (req, res) => {
     });
     await otpVerification.save();
 
-    res.json({ status: 'PENDING', message: 'Verification OTP email sent' });
+    // Thêm userId vào response cho frontend dùng ở /verify-otp
+    res.json({ 
+      status: 'PENDING', 
+      message: 'Verification OTP email sent',
+      userId: newUser._id  // Bonus: Để frontend dễ verify
+    });
   } catch (error) {
     res.status(500).json({ status: 'FAILED', message: error.message });
   }
 });
 
-// POST /verify-otp (Sửa: Dùng schema riêng, query by userId, xóa record sau verify)
+// POST /verify-otp (Giữ nguyên)
 router.post('/verify-otp', async (req, res) => {
-  const { userId, otp } = req.body;  // Nhận userId thay vì email (từ frontend sau signup)
+  const { userId, otp } = req.body;
   if (!userId || !otp) {
     return res.status(400).json({ message: 'User ID and OTP required' });
   }
 
   try {
-    // Tìm user
     const user = await User.findById(userId);
     if (!user) return res.status(400).json({ message: 'User not found' });
 
-    // Tìm OTP record mới nhất cho user
     const otpRecord = await UserOTPVerification.findOne({ userId })
-      .sort({ createdAt: -1 })  // Latest first
+      .sort({ createdAt: -1 })
       .lean();
 
     if (!otpRecord) {
       return res.status(400).json({ message: 'No OTP record found' });
     }
 
-    // Check expiry
     if (Date.now() > otpRecord.expiresAt) {
       return res.status(400).json({ message: 'OTP expired' });
     }
 
-    // Compare hashed OTP
     const isValidOTP = await bcrypt.compare(otp, otpRecord.otp);
     if (!isValidOTP) {
       return res.status(400).json({ message: 'Invalid OTP' });
     }
 
-    // Xóa OTP record
     await UserOTPVerification.deleteOne({ _id: otpRecord._id });
 
-    // Set user verified
     user.isVerified = true;
     await user.save();
 
-    // Issue JWT
     const payload = { id: user._id };
     const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' });
 
@@ -127,23 +123,17 @@ router.post('/verify-otp', async (req, res) => {
   }
 });
 
-// POST /login (Giữ nguyên, check isVerified)
+// POST /login (Thêm trim + toLowerCase cho email)
 router.post('/login', async (req, res) => {
-let { email, password } = req.body;  // Thêm let để trim
-  email = email?.trim();  // Sửa: Trim email để tránh space (bug phổ biến)
-  password = password?.trim();  // Trim password cho an toàn
+  let { email, password } = req.body;
+  email = email?.toLowerCase().trim();  // Sửa: Trim + lowercase cho nhất quán
+  password = password?.trim();
 
   try {
-    console.log('Login attempt for email:', email);  // Debug: Log email input
-
     const user = await User.findOne({ email });
-    console.log('User found:', user ? user.email : 'No user');  // Debug: Có tìm thấy user không?
-
     if (!user) return res.status(400).json({ message: 'Invalid credentials' });
 
     const isMatch = await user.matchPassword(password);
-    console.log('Password match:', isMatch);  // Debug: Compare result
-
     if (!isMatch) return res.status(400).json({ message: 'Invalid credentials' });
 
     if (!user.isVerified) return res.status(400).json({ message: 'Please verify your email first' });
@@ -158,23 +148,22 @@ let { email, password } = req.body;  // Thêm let để trim
       token
     });
   } catch (err) {
-    console.error('Login error:', err);  // Log full error
     res.status(500).json({ message: err.message });
   }
 });
 
-// Bonus: POST /resend-otp (Nếu user chưa verified, gửi OTP mới)
+// POST /resend-otp (Giữ nguyên)
 router.post('/resend-otp', async (req, res) => {
-  const { email } = req.body;
+  let { email } = req.body;  // Thêm trim + lowercase
+  email = email?.toLowerCase().trim();
+
   try {
     const user = await User.findOne({ email });
     if (!user) return res.status(400).json({ message: 'User not found' });
     if (user.isVerified) return res.status(400).json({ message: 'Already verified' });
 
-    // Xóa OTP cũ nếu có
     await UserOTPVerification.deleteMany({ userId: user._id });
 
-    // Gửi OTP mới
     const { hashedOTP, expiresAt } = await sendOTPVerificationEmail(user._id, email);
     const otpVerification = new UserOTPVerification({
       userId: user._id,
