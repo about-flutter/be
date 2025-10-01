@@ -34,7 +34,9 @@ const sendOTPVerificationEmail = async (userId, email) => {
         <p>This code expires in 1 hour.</p>
       `,
     };
-
+console.log('Attempting to send to:', email);
+console.log('Gmail user:', process.env.GMAIL_USER ? 'Set' : 'Missing');
+console.log('Gmail pass:', process.env.GMAIL_PASS ? 'Set' : 'Missing');
     await transporter.sendMail(mailOptions);
     console.log(`OTP sent to ${email}`);
     return { hashedOTP, expiresAt: new Date(Date.now() + 60 * 60 * 1000) };  // 1h expiry
