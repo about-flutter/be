@@ -129,12 +129,21 @@ router.post('/verify-otp', async (req, res) => {
 
 // POST /login (Giữ nguyên, check isVerified)
 router.post('/login', async (req, res) => {
-  const { email, password } = req.body;
+let { email, password } = req.body;  // Thêm let để trim
+  email = email?.trim();  // Sửa: Trim email để tránh space (bug phổ biến)
+  password = password?.trim();  // Trim password cho an toàn
+
   try {
+    console.log('Login attempt for email:', email);  // Debug: Log email input
+
     const user = await User.findOne({ email });
+    console.log('User found:', user ? user.email : 'No user');  // Debug: Có tìm thấy user không?
+
     if (!user) return res.status(400).json({ message: 'Invalid credentials' });
 
     const isMatch = await user.matchPassword(password);
+    console.log('Password match:', isMatch);  // Debug: Compare result
+
     if (!isMatch) return res.status(400).json({ message: 'Invalid credentials' });
 
     if (!user.isVerified) return res.status(400).json({ message: 'Please verify your email first' });
@@ -149,6 +158,7 @@ router.post('/login', async (req, res) => {
       token
     });
   } catch (err) {
+    console.error('Login error:', err);  // Log full error
     res.status(500).json({ message: err.message });
   }
 });
