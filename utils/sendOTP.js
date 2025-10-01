@@ -14,7 +14,10 @@ const sendOTPVerificationEmail = async (userId, email) => {
 
     const msg = {
       to: email,
-      from: process.env.SENDER_EMAIL,  // Verified sender
+      from: { 
+        email: process.env.SENDER_EMAIL,  // Sửa: Object với 'email' required
+        name: 'Ecommerce App'  // Optional: Tên sender để email chuyên nghiệp hơn
+      },
       subject: 'Verify Your Email',
       html: `
         <p>Enter <b>${otp}</b> in the app to verify your email address and complete signup.</p>
