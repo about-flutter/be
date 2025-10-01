@@ -9,9 +9,7 @@ const userSchema = new mongoose.Schema({
   address: { type: String, required: false }, // Optional address
   password: { type: String, required: true }, 
   isAdmin: { type: Boolean, default: false },
-  isVerified: { type: Boolean, default: false }, // New: Email verification status
-  otp: { type: String }, // New: Hashed OTP for verification
-  otpExpiry: { type: Date }, // New: OTP expiration timestamp
+  isVerified: { type: Boolean, default: false }, // Email verification status
 }, { timestamps: true });
 
 // Before saving, hash password if it's modified
@@ -25,14 +23,6 @@ userSchema.pre('save', async function (next) {
 // Compare password for login
 userSchema.methods.matchPassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
-};
-
-// New: Compare OTP
-userSchema.methods.matchOTP = async function (enteredOTP) {
-  if (!this.otp || !this.otpExpiry || Date.now() > this.otpExpiry) {
-    return false; // Expired or no OTP
-  }
-  return await bcrypt.compare(enteredOTP, this.otp);
 };
 
 module.exports = mongoose.model('User', userSchema);
