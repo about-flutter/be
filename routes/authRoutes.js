@@ -18,8 +18,8 @@ router.post('/signup', async (req, res) => {
   phone = phone?.trim();
   address = address?.trim();  // Optional
 
-  // Validation empty fields (phone/address optional)
-  if (!name || !email || !password || !dateOfBirth) {
+  // 👈 SỬA: Validation empty fields - chỉ bắt buộc name, email, password, phone (birthday/address optional)
+  if (!name || !email || !password || !phone) {
     return res.json({ status: 'FAILED', message: 'Empty input fields' });
   }
 
@@ -33,8 +33,8 @@ router.post('/signup', async (req, res) => {
     return res.json({ status: 'FAILED', message: 'Invalid email' });
   }
 
-  // Optional: Validate phone
-  if (phone && !/^\d{10,11}$/.test(phone)) {
+  // 👈 SỬA: Validate phone (bắt buộc, regex cho số điện thoại VN 10-11 chữ số)
+  if (!/^\d{10,11}$/.test(phone)) {
     return res.json({ status: 'FAILED', message: 'Invalid phone number' });
   }
 
@@ -58,9 +58,9 @@ router.post('/signup', async (req, res) => {
       email,  // 👈 Sử dụng email làm key chính thay vì userId
       name,
       password: hashedPassword,  // Lưu hashed password
-      birthday: dateOfBirth,
-      phone,
-      address,
+      birthday: dateOfBirth,  // Optional
+      phone,  // Bắt buộc
+      address,  // Optional
       otp: hashedOTP,
       expiresAt
     });
