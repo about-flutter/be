@@ -66,29 +66,31 @@ router.post('/signup', async (req, res) => {
     });
     await otpVerification.save();
 
-    // Thêm userId vào response cho frontend dùng ở /verify-otp
+    // SỬA: Không trả userId nữa, chỉ message (frontend sẽ dùng email để verify)
     res.json({ 
       status: 'PENDING', 
       message: 'Verification OTP email sent',
-      userId: newUser._id  // Bonus: Để frontend dễ verify
+      email: email  // Bonus: Trả email để frontend dễ dùng ở /verify-otp
     });
   } catch (error) {
     res.status(500).json({ status: 'FAILED', message: error.message });
   }
 });
 
-// POST /verify-otp (Giữ nguyên)
+// POST /verify-otp (SỬA: Nhận email thay vì userId)
 router.post('/verify-otp', async (req, res) => {
-  const { userId, otp } = req.body;
-  if (!userId || !otp) {
-    return res.status(400).json({ message: 'User ID and OTP required' });
+  const { email, otp } = req.body;  // SỬA: Nhận email và otp
+  if (!email || !otp) {
+    return res.status(400).json({ message: 'Email and OTP required' });
   }
 
   try {
-    const user = await User.findById(userId);
+    // SỬA: Tìm user bằng email thay vì userId
+    const user = await User.findOne({ email: email.toLowerCase().trim() });
     if (!user) return res.status(400).json({ message: 'User not found' });
 
-    const otpRecord = await UserOTPVerification.findOne({ userId })
+    // SỬA: Tìm OTP record bằng userId (từ user tìm được)
+    const otpRecord = await UserOTPVerification.findOne({ userId: user._id })
       .sort({ createdAt: -1 })
       .lean();
 
@@ -152,7 +154,7 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// POST /resend-otp (Giữ nguyên)
+// POST /resend-otp (Giữ nguyên, đã dùng email)
 router.post('/resend-otp', async (req, res) => {
   let { email } = req.body;  // Thêm trim + lowercase
   email = email?.toLowerCase().trim();
