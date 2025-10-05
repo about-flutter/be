@@ -23,7 +23,7 @@ const sendOTPVerificationEmail = async (userId, email) => {
       to: email,
       from: { 
         email: process.env.SENDER_EMAIL,  // Đảm bảo object với 'email' required
-        name: 'Ecommerce App'  // Optional name
+        name: 'Outfity App'  // Optional name
       },
       subject: 'Verify Your Email',
       html: `
