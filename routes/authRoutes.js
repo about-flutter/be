@@ -2,108 +2,115 @@ const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
 const UserOTPVerification = require('../models/UserOTPVerification');
-const bcrypt = require('bcryptjs');  // Giữ import nếu cần cho OTP
+const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { sendOTPVerificationEmail } = require('../utils/sendOTP');
 require('dotenv').config();
 
-// POST /signup
-// 👈 Không tạo user ngay, chỉ validate + gửi OTP + lưu temporary data vào UserOTPVerification
+// POST /signup: Không tạo user ngay, chỉ validate + gửi OTP + lưu temporary data
 router.post('/signup', async (req, res) => {
-  let { name, email, password, dateOfBirth, phone, address } = req.body;  // Thêm address
+  let { name, email, password, dateOfBirth, phone, address } = req.body;
+  // Trim và lowercase nhất quán
   name = name?.trim();
-  email = email?.toLowerCase().trim();  // Thêm toLowerCase cho case-insensitive
+  email = email?.toLowerCase().trim();
   password = password?.trim();
   dateOfBirth = dateOfBirth?.trim();
   phone = phone?.trim();
-  address = address?.trim();  // Optional
+  address = address?.trim();
 
-  // 👈 SỬA: Validation empty fields - chỉ bắt buộc name, email, password, phone (birthday/address optional)
+  // Validation empty fields: Bắt buộc name, email, password, phone
   if (!name || !email || !password || !phone) {
-    return res.json({ status: 'FAILED', message: 'Empty input fields' });
+    return res.status(400).json({ status: 'FAILED', message: 'Empty input fields' });
   }
 
-  // Validate name (basic regex)
+  // Validate name (chỉ chữ cái và space)
   if (!/^[a-zA-Z\s]+$/.test(name)) {
-    return res.json({ status: 'FAILED', message: 'Invalid name entered' });
+    return res.status(400).json({ status: 'FAILED', message: 'Invalid name entered' });
   }
 
-  // Validate email (basic)
+  // Validate email (basic regex)
   if (!/^[\w-.]+@([\w-]+\.)+[\w-]{2,4}$/.test(email)) {
-    return res.json({ status: 'FAILED', message: 'Invalid email' });
+    return res.status(400).json({ status: 'FAILED', message: 'Invalid email' });
   }
 
-  // 👈 SỬA: Validate phone (bắt buộc, regex cho số điện thoại VN 10-11 chữ số)
+  // Validate phone (10-11 chữ số VN)
   if (!/^\d{10,11}$/.test(phone)) {
-    return res.json({ status: 'FAILED', message: 'Invalid phone number' });
+    return res.status(400).json({ status: 'FAILED', message: 'Invalid phone number' });
+  }
+
+  // Validate password length (thêm cho an toàn)
+  if (password.length < 6) {
+    return res.status(400).json({ status: 'FAILED', message: 'Password too short' });
   }
 
   try {
-    // 👈 Check nếu email đã tồn tại (verified user hoặc pending OTP)
+    // Check nếu email đã tồn tại (verified user hoặc pending OTP)
     const existingUser = await User.findOne({ email });
     const existingOTP = await UserOTPVerification.findOne({ email });
     if (existingUser || existingOTP) {
-      return res.json({ status: 'FAILED', message: 'User with the provided email already exists or pending verification' });
+      return res.status(400).json({ status: 'FAILED', message: 'User with the provided email already exists or pending verification' });
     }
 
-    // 👈 Hash password trước khi lưu temporary
+    // Hash password trước khi lưu temporary
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // 👈 SỬA: Gọi sendOTPVerificationEmail chỉ với email (bỏ null userId)
+    // Gửi OTP và lấy hashedOTP, expiresAt
     const { hashedOTP, expiresAt } = await sendOTPVerificationEmail(email);
 
-    // 👈 Lưu temporary data vào UserOTPVerification (thêm fields user info)
-    // Giả sử schema đã thêm: email (unique), name, hashedPassword, birthday, phone, address
+    // Lưu temporary data
     const otpVerification = new UserOTPVerification({
-      email,  // 👈 Sử dụng email làm key chính thay vì userId
+      email,
       name,
-      password: hashedPassword,  // Lưu hashed password
+      password: hashedPassword,
       birthday: dateOfBirth,  // Optional
-      phone,  // Bắt buộc
+      phone,
       address,  // Optional
       otp: hashedOTP,
       expiresAt
     });
     await otpVerification.save();
 
-    // Trả PENDING, email
-    res.json({ 
+    // Trả PENDING với email để frontend dùng
+    res.status(201).json({ 
       status: 'PENDING', 
       message: 'Verification OTP email sent',
-      email: email  // Bonus: Trả email để frontend dễ dùng ở /verify-otp
+      email
     });
   } catch (error) {
-    res.status(500).json({ status: 'FAILED', message: error.message });
+    console.error('Signup error:', error);
+    res.status(500).json({ status: 'FAILED', message: 'Internal server error' });
   }
 });
 
-// POST /verify-otp (Nhận email thay vì userId, tạo user sau verify)
+// POST /verify-otp: Nhận email + otp, tạo user sau verify
 router.post('/verify-otp', async (req, res) => {
-  const { email, otp } = req.body;  // Nhận email và otp
+  let { email, otp } = req.body;
+  email = email?.toLowerCase().trim();
   if (!email || !otp) {
-    return res.status(400).json({ message: 'Email and OTP required' });
+    return res.status(400).json({ status: 'FAILED', message: 'Email and OTP required' });
   }
 
   try {
-    // Tìm OTP record bằng email
-    const otpRecord = await UserOTPVerification.findOne({ email: email.toLowerCase().trim() })
-      .sort({ createdAt: -1 })
-      .lean();
+    // Tìm OTP record bằng email (không cần sort vì unique)
+    const otpRecord = await UserOTPVerification.findOne({ email }).lean();
 
     if (!otpRecord) {
-      return res.status(400).json({ message: 'No OTP record found' });
+      return res.status(400).json({ status: 'FAILED', message: 'No OTP record found' });
     }
 
     if (Date.now() > otpRecord.expiresAt) {
-      return res.status(400).json({ message: 'OTP expired' });
+      // Xóa expired record luôn
+      await UserOTPVerification.deleteOne({ email });
+      return res.status(400).json({ status: 'FAILED', message: 'OTP expired' });
     }
 
+    // Verify OTP (plain vs hashed)
     const isValidOTP = await bcrypt.compare(otp, otpRecord.otp);
     if (!isValidOTP) {
-      return res.status(400).json({ message: 'Invalid OTP' });
+      return res.status(400).json({ status: 'FAILED', message: 'Invalid OTP' });
     }
 
-    // 👈 Tạo user mới từ temporary data sau khi verify thành công
+    // Tạo user mới từ temporary data
     const newUser = new User({
       name: otpRecord.name,
       email: otpRecord.email,
@@ -111,90 +118,117 @@ router.post('/verify-otp', async (req, res) => {
       birthday: otpRecord.birthday,
       phone: otpRecord.phone,
       address: otpRecord.address,
-      isVerified: true  // Set verified ngay
+      isVerified: true
     });
     await newUser.save();
 
-    // Xóa OTP record sau khi tạo user
+    // Xóa OTP record
     await UserOTPVerification.deleteOne({ _id: otpRecord._id });
 
+    // Tạo token
     const payload = { id: newUser._id };
     const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' });
 
     res.json({ 
+      status: 'SUCCESS',
       message: 'Email verified successfully!',
       token,
       user: { id: newUser._id, name: newUser.name, email: newUser.email }
     });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
+  } catch (error) {
+    console.error('Verify OTP error:', error);
+    res.status(500).json({ status: 'FAILED', message: 'Internal server error' });
   }
 });
 
-// POST /login (Giữ nguyên, chỉ login verified user)
+// POST /login: Chỉ login verified user
 router.post('/login', async (req, res) => {
   let { email, password } = req.body;
-  email = email?.toLowerCase().trim();  // Sửa: Trim + lowercase cho nhất quán
-  password = password?.trim();
+  email = email?.toLowerCase().trim();
+  if (!email || !password) {
+    return res.status(400).json({ status: 'FAILED', message: 'Email and password required' });
+  }
 
   try {
     const user = await User.findOne({ email });
-    if (!user) return res.status(400).json({ message: 'Invalid credentials' });
+    if (!user) {
+      return res.status(400).json({ status: 'FAILED', message: 'Invalid credentials' });
+    }
 
-    const isMatch = await user.matchPassword(password);
-    if (!isMatch) return res.status(400).json({ message: 'Invalid credentials' });
+    const isMatch = await user.matchPassword(password);  // Giả sử method có sẵn
+    if (!isMatch) {
+      return res.status(400).json({ status: 'FAILED', message: 'Invalid credentials' });
+    }
 
-    if (!user.isVerified) return res.status(400).json({ message: 'Please verify your email first' });
+    if (!user.isVerified) {
+      return res.status(400).json({ status: 'FAILED', message: 'Please verify your email first' });
+    }
 
     const payload = { id: user._id };
     const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' });
 
     res.json({
+      status: 'SUCCESS',
       id: user._id,
       name: user.name,
       email: user.email, 
       token
     });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ status: 'FAILED', message: 'Internal server error' });
   }
 });
 
-// POST /resend-otp (Dùng email, check pending record)
+// POST /resend-otp: Gửi OTP mới cho pending email
 router.post('/resend-otp', async (req, res) => {
-  let { email } = req.body;  // Thêm trim + lowercase
+  let { email } = req.body;
   email = email?.toLowerCase().trim();
+  if (!email) {
+    return res.status(400).json({ status: 'FAILED', message: 'Email required' });
+  }
 
   try {
-    // 👈 Check pending record hoặc verified user
+    // Check verified user
     const user = await User.findOne({ email });
-    if (user && user.isVerified) return res.status(400).json({ message: 'Already verified' });
+    if (user && user.isVerified) {
+      return res.status(400).json({ status: 'FAILED', message: 'Already verified' });
+    }
 
-    const existingOTP = await UserOTPVerification.findOne({ email });
-    if (!existingOTP) return res.status(400).json({ message: 'User not found or no pending verification' });
+    // Check pending record
+    const existingOTP = await UserOTPVerification.findOne({ email }).lean();
+    if (!existingOTP) {
+      return res.status(400).json({ status: 'FAILED', message: 'No pending verification found' });
+    }
 
-    // Xóa old OTP records
-    await UserOTPVerification.deleteMany({ email });
-
-    // 👈 SỬA: Gửi new OTP, nhưng cần temporary data từ existingOTP
-    const { hashedOTP, expiresAt } = await sendOTPVerificationEmail(email);  // 👈 Bỏ null userId
-
-    // Tạo new OTP record với data cũ
-    const newOtpVerification = new UserOTPVerification({
-      email: existingOTP.email,
+    // Copy data trước khi xóa old records
+    const tempData = {
       name: existingOTP.name,
       password: existingOTP.password,
       birthday: existingOTP.birthday,
       phone: existingOTP.phone,
-      address: existingOTP.address,
+      address: existingOTP.address
+    };
+
+    // Xóa old OTP records
+    await UserOTPVerification.deleteMany({ email });
+
+    // Gửi new OTP
+    const { hashedOTP, expiresAt } = await sendOTPVerificationEmail(email);
+
+    // Tạo new OTP record với data cũ
+    const newOtpVerification = new UserOTPVerification({
+      email,
+      ...tempData,  // Spread để copy fields
       otp: hashedOTP,
       expiresAt
     });
     await newOtpVerification.save();
 
-    res.json({ message: 'New OTP sent to email' });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.json({ status: 'SUCCESS', message: 'New OTP sent to email' });
+  } catch (error) {
+    console.error('Resend OTP error:', error);
+    res.status(500).json({ status: 'FAILED', message: 'Internal server error' });
   }
 });
 
