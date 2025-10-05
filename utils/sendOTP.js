@@ -4,14 +4,14 @@ require('dotenv').config();
 
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
-// OTP 4 số
+// Generate OTP 4 chữ số
 const generateOTP = () => Math.floor(1000 + Math.random() * 9000).toString();
 
-const sendOTPVerificationEmail = async (email) => {  // 👈 SỬA: Bỏ userId param (không dùng trong flow mới)
+const sendOTPVerificationEmail = async (email) => {
   try {
-    // Debug: Log env để confirm
-    if (!process.env.SENDER_EMAIL) {
-      throw new Error('SENDER_EMAIL env var is missing');
+    // Check env vars
+    if (!process.env.SENDGRID_API_KEY || !process.env.SENDER_EMAIL) {
+      throw new Error('Missing SENDGRID_API_KEY or SENDER_EMAIL env vars');
     }
     console.log('Sender email loaded:', process.env.SENDER_EMAIL);
 
@@ -22,8 +22,8 @@ const sendOTPVerificationEmail = async (email) => {  // 👈 SỬA: Bỏ userId 
     const msg = {
       to: email,
       from: { 
-        email: process.env.SENDER_EMAIL,  // Đảm bảo object với 'email' required
-        name: 'Outfity App'  // 👈 SỬA: Đổi tên app cho phù hợp
+        email: process.env.SENDER_EMAIL,
+        name: 'Outfity App'  // Tên app
       },
       subject: 'Verify Your Email',
       html: `
@@ -34,14 +34,18 @@ const sendOTPVerificationEmail = async (email) => {  // 👈 SỬA: Bỏ userId 
 
     await sgMail.send(msg);
     console.log(`OTP sent to ${email} via SendGrid`);
+
+    // Fallback expiry nếu env không set
     const expiryMinutes = parseInt(process.env.OTP_EXPIRY) || 10;
-    return { hashedOTP, expiresAt: new Date(Date.now() + expiryMinutes * 60 * 1000) };
+    const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
+    return { hashedOTP, expiresAt };
   } catch (error) {
-    console.error('SendGrid full error:', {
+    console.error('SendGrid error:', {
       message: error.message,
+      code: error.code,
       response: error.response ? error.response.body : 'No response'
     });
-    throw new Error('Failed to send OTP');
+    throw new Error('Failed to send OTP email');
   }
 };
 
