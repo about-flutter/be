@@ -13,9 +13,9 @@ const UserOTPVerificationSchema = new Schema({
   // 👈 THÊM: Temporary user info (sẽ dùng để tạo User sau verify)
   name: { type: String, required: true },
   password: { type: String, required: true },  // Đã hashed trước khi lưu
-  birthday: { type: String, required: true },  // Hoặc Date nếu parse
-  phone: { type: String },  // Optional
-  address: { type: String },  // Optional
+  birthday: { type: String, required: false },  // 👈 SỬA: Làm optional (không bắt buộc)
+  phone: { type: String, required: true },  // 👈 SỬA: Làm required (bắt buộc theo yêu cầu)
+  address: { type: String, required: false },  // Optional
   // OTP fields (giữ nguyên)
   otp: { type: String, required: true },
   createdAt: { type: Date, default: Date.now },
