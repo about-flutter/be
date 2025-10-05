@@ -8,6 +8,7 @@ const { sendOTPVerificationEmail } = require('../utils/sendOTP');
 require('dotenv').config();
 
 // POST /signup
+// 👈 SỬA: Không tạo user ngay, chỉ validate + gửi OTP + lưu temporary data vào UserOTPVerification
 router.post('/signup', async (req, res) => {
   let { name, email, password, dateOfBirth, phone, address } = req.body;  // Thêm address
   name = name?.trim();
@@ -38,35 +39,34 @@ router.post('/signup', async (req, res) => {
   }
 
   try {
-    // Check if user exists
+    // 👈 SỬA: Check nếu email đã tồn tại (verified user hoặc pending OTP)
     const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.json({ status: 'FAILED', message: 'User with the provided email already exists' });
+    const existingOTP = await UserOTPVerification.findOne({ email });
+    if (existingUser || existingOTP) {
+      return res.json({ status: 'FAILED', message: 'User with the provided email already exists or pending verification' });
     }
 
-    // SỬA: Không hash manual - để pre-save hook handle
-    const newUser = new User({
-      name,
-      email,
-      password,  // Plain password - pre-save sẽ hash
-      birthday: dateOfBirth,
-      phone,
-      address  // Thêm nếu có
-    });
-    await newUser.save();  // Pre-save hook chạy ở đây, hash password
+    // 👈 SỬA: Hash password trước khi lưu temporary
+    const hashedPassword = await bcrypt.hash(password, 10);
 
     // Send OTP and get hashedOTP
-    const { hashedOTP, expiresAt } = await sendOTPVerificationEmail(newUser._id, email);
+    const { hashedOTP, expiresAt } = await sendOTPVerificationEmail(null, email);  // 👈 Không cần userId nữa
 
-    // Create OTP record
+    // 👈 SỬA: Lưu temporary data vào UserOTPVerification (thêm fields user info)
+    // Giả sử schema đã thêm: email (unique), name, hashedPassword, birthday, phone, address
     const otpVerification = new UserOTPVerification({
-      userId: newUser._id,
+      email,  // 👈 Sử dụng email làm key chính thay vì userId
+      name,
+      password: hashedPassword,  // Lưu hashed password
+      birthday: dateOfBirth,
+      phone,
+      address,
       otp: hashedOTP,
       expiresAt
     });
     await otpVerification.save();
 
-    // SỬA: Không trả userId nữa, chỉ message (frontend sẽ dùng email để verify)
+    // Trả PENDING, email
     res.json({ 
       status: 'PENDING', 
       message: 'Verification OTP email sent',
@@ -77,20 +77,16 @@ router.post('/signup', async (req, res) => {
   }
 });
 
-// POST /verify-otp (SỬA: Nhận email thay vì userId)
+// POST /verify-otp (SỬA: Nhận email thay vì userId, tạo user sau verify)
 router.post('/verify-otp', async (req, res) => {
-  const { email, otp } = req.body;  // SỬA: Nhận email và otp
+  const { email, otp } = req.body;  // Nhận email và otp
   if (!email || !otp) {
     return res.status(400).json({ message: 'Email and OTP required' });
   }
 
   try {
-    // SỬA: Tìm user bằng email thay vì userId
-    const user = await User.findOne({ email: email.toLowerCase().trim() });
-    if (!user) return res.status(400).json({ message: 'User not found' });
-
-    // SỬA: Tìm OTP record bằng userId (từ user tìm được)
-    const otpRecord = await UserOTPVerification.findOne({ userId: user._id })
+    // Tìm OTP record bằng email
+    const otpRecord = await UserOTPVerification.findOne({ email: email.toLowerCase().trim() })
       .sort({ createdAt: -1 })
       .lean();
 
@@ -107,25 +103,35 @@ router.post('/verify-otp', async (req, res) => {
       return res.status(400).json({ message: 'Invalid OTP' });
     }
 
+    // 👈 SỬA: Tạo user mới từ temporary data sau khi verify thành công
+    const newUser = new User({
+      name: otpRecord.name,
+      email: otpRecord.email,
+      password: otpRecord.password,  // Đã hashed
+      birthday: otpRecord.birthday,
+      phone: otpRecord.phone,
+      address: otpRecord.address,
+      isVerified: true  // Set verified ngay
+    });
+    await newUser.save();
+
+    // Xóa OTP record sau khi tạo user
     await UserOTPVerification.deleteOne({ _id: otpRecord._id });
 
-    user.isVerified = true;
-    await user.save();
-
-    const payload = { id: user._id };
+    const payload = { id: newUser._id };
     const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' });
 
     res.json({ 
       message: 'Email verified successfully!',
       token,
-      user: { id: user._id, name: user.name, email: user.email }
+      user: { id: newUser._id, name: newUser.name, email: newUser.email }
     });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// POST /login (Thêm trim + toLowerCase cho email)
+// POST /login (Giữ nguyên, chỉ login verified user)
 router.post('/login', async (req, res) => {
   let { email, password } = req.body;
   email = email?.toLowerCase().trim();  // Sửa: Trim + lowercase cho nhất quán
@@ -154,25 +160,37 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// POST /resend-otp (Giữ nguyên, đã dùng email)
+// POST /resend-otp (SỬA: Dùng email, check pending record)
 router.post('/resend-otp', async (req, res) => {
   let { email } = req.body;  // Thêm trim + lowercase
   email = email?.toLowerCase().trim();
 
   try {
+    // 👈 SỬA: Check pending record hoặc verified user
     const user = await User.findOne({ email });
-    if (!user) return res.status(400).json({ message: 'User not found' });
-    if (user.isVerified) return res.status(400).json({ message: 'Already verified' });
+    if (user && user.isVerified) return res.status(400).json({ message: 'Already verified' });
 
-    await UserOTPVerification.deleteMany({ userId: user._id });
+    const existingOTP = await UserOTPVerification.findOne({ email });
+    if (!existingOTP) return res.status(400).json({ message: 'User not found or no pending verification' });
 
-    const { hashedOTP, expiresAt } = await sendOTPVerificationEmail(user._id, email);
-    const otpVerification = new UserOTPVerification({
-      userId: user._id,
+    // Xóa old OTP records
+    await UserOTPVerification.deleteMany({ email });
+
+    // 👈 SỬA: Gửi new OTP, nhưng cần temporary data từ existingOTP
+    const { hashedOTP, expiresAt } = await sendOTPVerificationEmail(null, email);
+
+    // Tạo new OTP record với data cũ
+    const newOtpVerification = new UserOTPVerification({
+      email: existingOTP.email,
+      name: existingOTP.name,
+      password: existingOTP.password,
+      birthday: existingOTP.birthday,
+      phone: existingOTP.phone,
+      address: existingOTP.address,
       otp: hashedOTP,
       expiresAt
     });
-    await otpVerification.save();
+    await newOtpVerification.save();
 
     res.json({ message: 'New OTP sent to email' });
   } catch (err) {
