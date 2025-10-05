@@ -7,7 +7,7 @@ sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 // OTP 4 số
 const generateOTP = () => Math.floor(1000 + Math.random() * 9000).toString();
 
-const sendOTPVerificationEmail = async (userId, email) => {
+const sendOTPVerificationEmail = async (email) => {  // 👈 SỬA: Bỏ userId param (không dùng trong flow mới)
   try {
     // Debug: Log env để confirm
     if (!process.env.SENDER_EMAIL) {
@@ -23,7 +23,7 @@ const sendOTPVerificationEmail = async (userId, email) => {
       to: email,
       from: { 
         email: process.env.SENDER_EMAIL,  // Đảm bảo object với 'email' required
-        name: 'Outfity App'  // Optional name
+        name: 'Outfity App'  // 👈 SỬA: Đổi tên app cho phù hợp
       },
       subject: 'Verify Your Email',
       html: `
